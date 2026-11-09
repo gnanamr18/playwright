@@ -9,7 +9,8 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # Run on main and on feature branches (so CI runs when you push ci/playwright too)
+    branches: [main, "ci/**"]
 
 jobs:
   unit-tests:
@@ -49,7 +50,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U ${{ secrets.CI_POSTGRES_USER }}"
+          --health-cmd "pg_isready"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
