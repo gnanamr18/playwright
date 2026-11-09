@@ -1,13 +1,16 @@
 # CI = Continuous Integration
-# Runs automatically on GitHub when you open/update a Pull Request (or push to main).
-# This first version runs Jest unit tests only (fast, no browser/DB needed).
+# Runs on Pull Requests and pushes to main.
+# - Jest: fast unit tests (no browser/DB)
+# - Playwright: browser e2e (needs Chromium + Postgres + backend)
+# Public GitHub repos: standard Actions runners are free.
 
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [main]
+    # Run on main and on feature branches (so CI runs when you push ci/playwright too)
+    branches: [main, "ci/**"]
 
 jobs:
   unit-tests:
@@ -30,3 +33,87 @@ jobs:
 
       - name: Run Jest
         run: npm run test:unit
+
+  e2e-tests:
+    name: Playwright e2e tests
+    runs-on: ubuntu-latest
+
+    # Temporary Postgres only for this CI job (not your AWS / local DB).
+    # Values come from GitHub Secrets (Settings → Secrets and variables → Actions).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ${{ secrets.CI_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.CI_POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PORT: "4000"
+      DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.CI_JWT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install root dependencies (Playwright)
+        run: npm install
+
+      - name: Install backend dependencies
+        run: npm install --prefix backend
+
+      - name: Install frontend dependencies
+        run: npm install --prefix frontend
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Create backend .env for CI
+        run: |
+          echo "PORT=$PORT" > backend/.env
+          echo "DATABASE_URL=$DATABASE_URL" >> backend/.env
+          echo "JWT_SECRET=$JWT_SECRET" >> backend/.env
+
+      - name: Setup database (Prisma)
+        working-directory: backend
+        run: |
+          npx prisma generate
+          npx prisma db push
+          npm run db:seed
+
+      - name: Start backend
+        working-directory: backend
+        run: npm start &
+
+      - name: Wait for backend
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:4000/api/health; then
+              echo "Backend is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not start in time"
+          exit 1
+
+      - name: Run Playwright
+        run: npm run test:e2e
