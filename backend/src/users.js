@@ -3,7 +3,8 @@
  * Passwords are checked here — they are NOT stored in Postgres.
  */
 export const HARDCODED_USERS = [
-  { username: "alice", password: "alice123" },
+  // Intentionally broken for CI-fail learning demo (was alice123)
+  { username: "alice", password: "alice999" },
   { username: "bob", password: "bob123" },
 ];
 
